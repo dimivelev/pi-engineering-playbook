@@ -3,12 +3,12 @@ export const SECTION = "engineering_playbook";
 
 export type WorkflowAction = "plan" | "build" | "review" | "release";
 export type Command =
-  | { kind: "help" | "status" | "on" | "off" }
+  | { kind: "help" | "status" | "on" | "off" | "reset" }
   | { kind: "workflow"; action: WorkflowAction; objective: string }
   | { kind: "invalid"; message: string };
 
 export const HELP = `Engineering Playbook
-/engineering on | off | status
+/engineering on | off | status | reset
 /engineering plan <objective>
 /engineering build <objective>
 /engineering review <scope>
@@ -21,10 +21,10 @@ export function parseCommand(args: string): Command {
   if (!match) return { kind: "help" };
   const action = match[1].toLowerCase();
   const objective = (match[2] ?? "").trim();
-  if (["help", "status", "on", "off"].includes(action)) {
+  if (["help", "status", "on", "off", "reset"].includes(action)) {
     return objective
       ? { kind: "invalid", message: `${action} does not take an objective.` }
-      : { kind: action as "help" | "status" | "on" | "off" };
+      : { kind: action as "help" | "status" | "on" | "off" | "reset" };
   }
   if (["plan", "build", "review", "release"].includes(action)) {
     return objective

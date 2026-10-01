@@ -15,10 +15,12 @@ function harness(initialEntries: unknown[] = []) {
   const pi = {
     on(name: string, handler: (event: any, ctx: ExtensionContext) => unknown) { handlers.set(name, handler); },
     registerCommand(_name: string, options: { handler: typeof command }) { command = options.handler; },
+    registerTool() {},
     appendEntry(customType: string, data: unknown) { entries.push({ type: "custom", customType, data }); },
     sendUserMessage(content: string, options: unknown) { messages.push({ content, options }); }
   } as unknown as ExtensionAPI;
   const ctx = {
+    cwd: process.cwd(),
     hasUI: true,
     ui: {
       notify(text: string, type: string) { notices.push({ text, type }); },

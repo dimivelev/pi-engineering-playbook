@@ -1,18 +1,41 @@
 {
   "name": "pi-engineering-playbook",
-  "version": "0.2.0",
-  "description": "Research-informed end-to-end engineering workflow for Pi, with horizontal and vertical slices.",
+  "version": "0.3.0",
+  "description": "Advisory engineering skills for Pi with GitHub issue tracking, verified checkpoints and Machinist stage integration.",
   "type": "module",
   "private": true,
   "license": "MIT",
-  "keywords": ["pi-package", "pi-extension", "engineering", "agent-skills"],
-  "engines": { "node": ">=22.19.0" },
-  "files": ["extensions", "skills", "README.md", "LICENSE", "NOTICE.md"],
-  "pi": {
-    "extensions": ["./extensions/index.ts"],
-    "skills": ["./skills"]
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "engineering",
+    "agent-skills"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
   },
-  "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "typebox": "*" },
+  "files": [
+    "extensions",
+    "skills",
+    "scripts/machinist-pi.ts",
+    "examples",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.99.1",
     "@types/node": "22.19.19",

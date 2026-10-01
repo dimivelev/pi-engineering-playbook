@@ -46,6 +46,11 @@ try {
   assert.equal(SECTION in disabled.systemPromptOptions.sections, false);
   session.sessionManager.appendCustomEntry(STATE_TYPE, { version: 1, enabled: true });
   await runner.emit({ type: "session_start", reason: "reload" });
+  const advisory = await runner.emitToolCall({ type: "tool_call", toolName: "write", toolCallId: "advisory-write", input: { path: "check.mjs", content: "unchecked" } });
+  assert.equal(advisory?.block, undefined);
+  await runner.emitToolResult({type:"tool_result",toolName:"write",toolCallId:"advisory-write",input:{path:"check.mjs",content:"unchecked"},content:[],details:undefined,isError:false});
+  session.sessionManager.appendCustomEntry(STATE_TYPE, { version: 1, enabled: true, policy: "strict" });
+  await runner.emit({ type: "session_start", reason: "reload" });
   const blocked = await runner.emitToolCall({ type: "tool_call", toolName: "write", toolCallId: "blocked-write", input: { path: "check.mjs", content: "unchecked" } });
   assert.equal(blocked?.block, true);
   await promisify(execFile)("git", ["init"], { cwd: scratch });
@@ -61,7 +66,7 @@ try {
   assert.match(JSON.stringify(verified.content),/passed/);
   const completed = await execute({ action: "complete" });
   assert.match(JSON.stringify(completed.content),/verified/);
-  console.log("Pi host check passed: package/skill loading, persisted mode, real tool-call block, real verification execution, and completion gate.");
+  console.log("Pi host check passed: package/skill loading, advisory default, persisted strict mode, real tool-call block, real verification execution, and completion gate.");
 } finally {
   dispose?.();
   await rm(scratch, { recursive: true, force: true });

@@ -1,0 +1,45 @@
+# Merge commands/workflows into your Machinist control-plane config.
+# Register executors and repositories on the worker. Replace absolute paths.
+# The worker needs Node >=22.19, Pi/model authentication and this package's dependencies.
+[executors.pi-plan]
+command = ["node", "--experimental-strip-types", "/absolute/path/pi-engineering-playbook/scripts/machinist-pi.ts", "plan"]
+
+[executors.pi-build]
+command = ["node", "--experimental-strip-types", "/absolute/path/pi-engineering-playbook/scripts/machinist-pi.ts", "build"]
+
+[executors.pi-review]
+command = ["node", "--experimental-strip-types", "/absolute/path/pi-engineering-playbook/scripts/machinist-pi.ts", "review"]
+
+[repositories.my-project]
+path = "/absolute/path/my-project"
+
+[commands.engineering-plan]
+executor = "pi-plan"
+prompt_file = "plan.md"
+timeout = "15m"
+
+[commands.engineering-build]
+executor = "pi-build"
+prompt_file = "build.md"
+timeout = "90m"
+
+[commands.engineering-review]
+executor = "pi-review"
+prompt_file = "review.md"
+timeout = "20m"
+
+# Autonomous within the already-authorized task scope. No implicit merge/deploy.
+[workflows.engineering-delivery]
+steps = [
+  { command = "engineering-plan", required_outputs = ["plan.md"] },
+  { command = "engineering-build", required_outputs = ["delivery.md"] },
+  { command = "engineering-review", required_outputs = ["review.md"] },
+]
+
+# Optional operator-selected review boundary; do not gate every tool call.
+[workflows.engineering-approved-delivery]
+steps = [
+  { command = "engineering-plan", required_outputs = ["plan.md"] },
+  { command = "engineering-build", approval = "before", required_outputs = ["delivery.md"] },
+  { command = "engineering-review", required_outputs = ["review.md"] },
+]

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import engineeringPlaybook from "../extensions/index.ts";
-import { SECTION, STATE_TYPE, parseCommand, restoreEnabled, workflowPrompt } from "../extensions/workflow.ts";
+import { SECTION, STATE_TYPE, parseCommand, restoreEnabled, restorePolicy, workflowPrompt } from "../extensions/workflow.ts";
 
 function harness(initialEntries: unknown[] = []) {
   const handlers = new Map<string, (event: any, ctx: ExtensionContext) => unknown>();
@@ -108,4 +108,17 @@ test("plan and release retain their requested stopping points", () => {
   assert.match(workflowPrompt("plan", "CSV export", "/skill.md"), /Stop at a plan; do not implement/);
   assert.match(workflowPrompt("review", "diff", "/skill.md"), /Stop at the review/);
   assert.match(workflowPrompt("release", "v1", "/skill.md"), /do not publish, deploy, or apply production migrations/);
+});
+
+test("legacy sessions migrate to advisory; explicit strict survives resume and branch changes", async () => {
+  const legacy=[{type:"custom",customType:STATE_TYPE,data:{version:1,enabled:true}}];
+  assert.equal(restorePolicy(legacy),"advisory");
+  const h=harness(legacy); h.emit("session_start"); h.inject();
+  assert.match((h.event.systemPromptOptions.sections as Record<string,string>)[SECTION],/Advisory mode/);
+  await h.run("strict"); assert.equal(restorePolicy(h.entries()),"strict");
+  const restarted=harness(h.entries()); restarted.emit("session_start"); restarted.inject();
+  assert.match((restarted.event.systemPromptOptions.sections as Record<string,string>)[SECTION],/Strict gates/);
+  restarted.setEntries([]); restarted.emit("session_tree"); restarted.inject();
+  assert.match((restarted.event.systemPromptOptions.sections as Record<string,string>)[SECTION],/Advisory mode/);
+  assert.deepEqual(parseCommand("tickets acme/app"),{kind:"workflow",action:"tickets",objective:"acme/app"});
 });

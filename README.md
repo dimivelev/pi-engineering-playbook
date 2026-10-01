@@ -1,76 +1,72 @@
 # Pi Engineering Playbook
 
-An installable Pi extension and skill for delivering software in small, verifiable slices. Version 0.2.0 adds runtime gates alongside session workflow commands and a compact prompt section. The bundled skill contains the complete research-informed playbook and all 25 workflows adapted from Addy Osmani's agent-skills.
+Engineering skills for Pi, combining the 25 workflows adapted from [Addy Osmani's agent-skills](https://github.com/addyosmani/agent-skills) with stage handoffs and recovery inspired by [Machinist](https://github.com/owainlewis/machinist).
 
-## Install
+Version **0.3.0** uses **advisory mode by default**. It guides discovery, small horizontal/vertical slices, verification and review while preserving the agent's answer. Missing tooling becomes an explicit verification gap; it does not replace the answer or force repeated repair turns. Strict runtime gates are available by explicit choice.
 
-Requires Git, Bash, Node.js 22.19 or newer, a Git working tree for verification, and **Pi 0.99.1 or newer**, from `@earendil-works/pi-coding-agent`. Version 0.99.1 is the tested host. Linux/macOS are the intended verification environments. Older `@mariozechner` releases, Windows verification, and other Pi forks are not tested.
+## Install or update
 
-From a local checkout:
-
-```bash
-pi install ./pi-engineering-playbook
-```
-
-From GitHub:
+Tested with `@earendil-works/pi-coding-agent` **0.99.1** and Node.js **22.19+**. The verification tool needs Git and Bash in a Git working tree. Ordinary advisory work does not require a formal plan or Git. Older `@mariozechner` releases, other Pi forks and Windows verification are not tested.
 
 ```bash
 pi install git:github.com/dimivelev/pi-engineering-playbook
+# If already installed:
+pi update git:github.com/dimivelev/pi-engineering-playbook
 ```
 
-For a private repository, Pi's git process needs your existing GitHub authentication. Add `--local` to install for one project. Start a new Pi session or run `/reload` after installation. The package exposes both the extension and the `engineering-delivery` skill. No compilation step or extra runtime service is required.
+Run `/reload` or start a new session. Existing v0.2 session snapshots migrate to advisory automatically; their plans remain available. To switch immediately in an updated running session:
 
-To try only the extension in a checkout:
-
-```bash
-pi --extension ./extensions/index.ts
+```text
+/engineering advisory
 ```
+
+Local installation: `pi install ./pi-engineering-playbook`. Add `--local` for one project. Pi's Git process uses your local GitHub authentication. No background service or model call runs when loading this package.
 
 ## Use
 
 ```text
-/engineering plan Add CSV export with a date filter
-/engineering build Implement the approved CSV export
-/engineering review Check the current diff and integration gaps
+/engineering plan Add CSV export with date filtering
+/engineering build Implement issue #42
+/engineering review Check the diff and integration evidence
 /engineering release Assess readiness for version 1.0
+/engineering tickets owner/repository
 /engineering status
+/engineering advisory
+/engineering strict
 /engineering off
 /engineering on
 /engineering reset
 /skill:engineering-delivery
 ```
 
-The playbook and runtime gates are enabled by default. `/engineering off` disables the gates and automatic prompt contribution; the skill remains available for explicit use. The setting belongs to the current session branch and survives resume/reload. A new session starts enabled. A workflow command re-enables it. Only a user command can turn the gates off or reset the plan. Commands that start work or change the setting require an idle agent.
-
-| Command | Result |
+| Command | Behavior |
 | --- | --- |
-| `plan <objective>` | Acceptance criteria, dependency order, slice types, integration checkpoints, and verification plan; stops before implementation |
-| `build <objective>` | Implements and verifies the requested outcome using available project tools and authorized scope |
-| `review <scope>` | Findings and verification gaps; stops before fixes unless requested |
-| `release <scope>` | Readiness checks, blockers, rollout and rollback plan; authorizes preparation only |
-| `on`, `off`, `status` | Controls or shows session workflow state |
-| `reset` | Explicitly discards the current runtime plan; leaves project files intact |
-| no argument or `help` | Command usage |
+| `plan <objective>` | Acceptance, dependencies, verification and integration checkpoints; explicitly stops before implementation |
+| `build <objective>` | Implements and verifies within the authorized scope; reports actual evidence and remaining work |
+| `review <scope>` | Findings and evidence gaps; stops before fixes unless requested |
+| `release <scope>` | Readiness, rollout and recovery preparation; no implicit deploy, publish or production migration |
+| `tickets <repository or scope>` | Reads existing tickets and recommends relevant next work |
+| `advisory` | Enables guidance without plan prerequisites, rewritten final answers or forced repair turns |
+| `strict` | Explicitly enables runtime edit/shell/completion gates |
+| `off`, `on` | Disables/enables guidance; `on` retains the selected policy |
+| `status`, `reset` | Shows state or explicitly clears the local plan; leaves project files intact |
 
-## Runtime enforcement
+Policy is saved on the session branch and restored on resume/tree navigation. New sessions start enabled in advisory mode. Workflow commands enable the skill without silently switching the selected policy. Commands that start work or change settings require an idle agent.
 
-The model uses the registered `engineering_workflow` tool. The normal sequence is `plan → start → work → verify → complete` for each slice. A small task can use one slice and one meaningful check. The `/engineering plan` command has a separate plan-only stopping point and blocks implementation.
+## When tools are missing
 
-Before a slice is active, the extension blocks `edit`, `write`, **all shell commands**, and other non-read tools. It does not try to infer whether an arbitrary shell command is harmless. `read`, `grep`, `find`, and `ls` stay available if enabled in the host; `engineering_workflow status` also lists project entries. If you use a custom `--tools` allowlist, include `engineering_workflow` or deliberately turn gates off.
+For example, if `uv` is absent, a virtual environment points to missing Python 3.12, and pytest/hatchling are unavailable:
 
-The runtime checks require:
+1. Inspect the manifest and CI for a supported existing alternative.
+2. Run available meaningful checks, such as syntax and diff checks, and label exactly what they prove.
+3. Keep HTTP integration and wheel build explicitly unverified.
+4. Continue independent work such as rendering, preserve changes, and give concrete recovery steps.
 
-- Unique slice IDs, nonempty outcomes/acceptance, an acyclic dependency graph, and one active slice.
-- A named consumer/checkpoint for horizontal slices; an integration/e2e check for vertical slices.
-- Verification executed by the extension using the exact commands in the plan. Caller-supplied success flags and evidence are ignored.
-- Exit code zero, no cancellation/timeout, and an unchanged project fingerprint during a check.
-- Fresh evidence for the active slice and previously verified slices before completing the next integration checkpoint. Use `verify` without `sliceId` to recheck all nonblocked slices.
+The default extension preserves the agent's useful final explanation. It does not impose a generic incomplete message or request extra repair turns. An unavailable check is not a passing check; advisory behavior does not authorize weakened tests or misleading completion claims. The agent still follows project requirements and the user's scope.
 
-Every non-read tool call invalidates evidence. The fingerprint covers Git HEAD, tracked files, and nonignored untracked files, including their paths, modes, contents and symlink targets as link text. External edits are detected on completion. Restoring a session/branch preserves its plan but requires checks to run again. Verification blocks other non-read tool calls while it runs; outstanding tool calls must finish before workflow state can change.
+## Optional recorded workflow
 
-Unchecked final assistant answers are replaced with an explicit incomplete status. The extension requests at most two repair turns, then leaves an incomplete report rather than looping. A concrete `blocked` record can stop work, but the final runtime report identifies the workflow as blocked. Aborted/error runs are not automatically continued. Plans cannot be silently replaced; the user can `/engineering reset` for a new task.
-
-Example arguments for the model's first tool call:
+For substantial work, `engineering_workflow` records `plan → start → work → verify → complete`. A small edit can use an inline plan and ordinary tools instead. Use existing issue URLs as the durable tracker; session records supplement them.
 
 ```json
 {
@@ -78,37 +74,74 @@ Example arguments for the model's first tool call:
   "slices": [{
     "id": "V1",
     "kind": "vertical",
-    "outcome": "CSV download includes only the signed-in user's selected date range",
-    "acceptance": ["Other users' records never appear", "The actual request handler produces valid CSV"],
+    "outcome": "Signed-in user downloads correctly scoped CSV",
+    "acceptance": ["Other users' records never appear", "The real handler produces valid CSV"],
     "dependsOn": [],
-    "checks": [{ "id": "export", "command": "npm run test:integration -- export", "kind": "integration" }]
+    "issueUrl": "https://github.com/owner/repository/issues/42",
+    "checks": [{"id":"export","command":"npm run test:integration -- export","kind":"integration"}]
   }]
 }
 ```
 
-Then `{"action":"start","sliceId":"V1"}`, project tools, `{"action":"verify"}`, and `{"action":"complete"}`. If a required service is unavailable, use `{"action":"blocked","sliceId":"V1","reason":"The integration database is unavailable"}`.
+Then use `start` with `sliceId`, project tools, `verify`, and `complete`. Horizontal enablers need a named consumer; vertical slices need an integration/e2e check. `verify` executes commands for the active or previously verified slices, with a five-minute limit per check. It records real successful exits and a Git-tree fingerprint. `complete` rejects missing or stale evidence in either policy: that action specifically claims verified completion, so a partial handoff uses a different action.
 
-## Enforcement limits
+```json
+{"action":"blocked","sliceId":"V1","reason":"HTTP integration needs the unavailable database; static checks passed"}
+```
 
-These gates enforce recorded process and execution evidence, **not all 25 workflows' semantic quality**. The model selects commands and labels check types; a weak or incorrectly labeled check can pass. Review the plan and checks against acceptance criteria. A successful command is not proof of correctness, security, production health, or a real end-to-end consumer flow.
+```json
+{"action":"handoff","summary":"CSV handler implemented. HTTP integration remains unverified; rendering is next.","nextSteps":["Restore the project-supported test environment","Run the planned HTTP and wheel checks"]}
+```
 
-This is not a security sandbox. Other extensions, user-entered shell commands, external processes, ignored files, contents behind symlinks, remote systems, and modifications to the extension/session itself are outside the guarantee. Commands may start background processes; the extension cannot establish quiescence for every subprocess. Prompt priority, release authorization, independent review, test adequacy, and research-backed judgment still need host permissions and human/project policies. Read-only tasks that never enter the runtime workflow receive guidance without completion gating.
+`handoff` saves a session record with linked issues, remaining slices, blockers and current passing-check evidence. It does not mark work complete, write files, publish or stop advisory work. Copy relevant evidence into the existing issue/report when that write is requested. In advisory mode the agent may revise a plan for a new task without requiring `/engineering reset`; previous snapshots remain in session history. Dependency order remains guidance, so an environment gap does not prevent starting another slice.
 
-## Horizontal and vertical slices
+## GitHub issue tracking
 
-Use a **vertical slice** for a complete observable behavior through the layers it needs: for example, a signed-in user selects a date range, requests CSV, and downloads correct persisted data.
+`engineering_issues` provides read-only open/closed/all ticket lists and ticket details using the local authenticated `gh` CLI. Existing issues can contain acceptance criteria, slice checklists, blockers and PR links. Missing CLI/auth is reported once; local work can continue.
 
-Use a **horizontal slice** for a bounded shared enabler: for example, a scoped query reused by CSV export and an identified future consumer. Record its contract, tests, immediate consumer, and next integration checkpoint. A completed layer alone does not mean the feature works end to end.
+```json
+{"action":"list","repo":"owner/repository","state":"open","limit":30}
+```
 
-The playbook works through discovery, baseline, design, slicing, implementation, integration, verification/review, release preparation, and operational learning. Scale these stages to the task: a small edit should not create a large process.
+```json
+{"action":"view","repo":"owner/repository","number":42}
+```
 
-## What runs automatically
+No auto-posting, closure, assignment, background polling or Projects board synchronization runs. Issue writes use ordinary GitHub tools when requested by the user. The ChatGPT GitHub connector credentials are not transferred to Pi. See [GitHub tracking guide](docs/github-tracking.md).
 
-The extension registers one command and one tool, listens for lifecycle/tool events, and contributes a dedicated structured prompt section. It preserves Pi's other prompt sections and active tools. The full playbook is loaded only when relevant. Loading the extension does not launch subprocesses, fetch resources, deploy, or modify project files. Verification tool calls execute planned Bash commands with a five-minute limit per check and host cancellation support.
+## Machinist integration
 
-Workflow commands instruct the model, while tool events and completion hooks enforce the recorded gates. Release readiness and actual deployment are distinct. The extension supplies no production deployment authorization. A custom forced system prompt can hide the workflow instructions even though tool gates remain registered; another extension can interfere with event handling.
+[Example commands, prompts and workflows](examples/machinist/) supply **plan → build → review** stages and an optional operator-selected approval before build. Machinist owns stage progression, history, artifact transfer and configured approvals; this package supplies engineering guidance and a Pi CLI adapter. It does not recreate the Machinist control plane.
 
-## Development and verification
+On a worker:
+
+1. Check out this package and run `npm ci --ignore-scripts`.
+2. Install/authenticate Pi and choose its model using the normal worker configuration.
+3. Replace paths in [config.toml](examples/machinist/config.toml), place the prompts beside the configuration, and register commands/workflows on the control plane and executors/repositories on the worker.
+4. Submit an authorized task using your configured repository name and workflow.
+
+```bash
+machinist submit --workflow engineering-delivery --repo my-project \
+  --title "Implement CSV export" --source-url https://github.com/owner/repository/issues/42
+```
+
+[scripts/machinist-pi.ts](scripts/machinist-pi.ts) reads the rendered task on stdin, runs Pi with this extension in an isolated extension loadout, streams output and forwards cancellation. `PI_ENGINEERING_PI_BINARY` can select the executable; trailing arguments in the executor command can select Pi's provider/model. Other discovered extensions are disabled for this example to avoid duplicate registrations; explicitly add needed worker extensions through trailing Pi arguments.
+
+The adapter explains `MACHINIST_STEP_RESULT_PATH`, `MACHINIST_OUTPUT_DIR` and `MACHINIST_SCRATCH_DIR` to Pi. It removes a stale result before starting, propagates process failures and rejects a missing/invalid/oversized result. It accepts an honest `blocked` result with process exit zero, leaving progression decisions to Machinist. It does not independently certify the agent's claimed semantic quality. Required outputs are checked by Machinist, not inferred from text. A missing delivery check may pause the next stage after useful work and a report have been saved; it does not interrupt every tool call.
+
+The adapter/contract is tested with a fake Pi subprocess, and the extension separately loads in the real Pi host. No live model-backed Machinist deployment has been run here. Configuration follows upstream Machinist commit `39435164faf1ff7fad49e41c38a7eb1a00538f21`; check its current docs before operating a different version.
+
+## Explicit strict mode and limits
+
+`/engineering strict` enables the v0.2-style gates: edits, all shell calls and other non-read tools need an active slice; only one slice is active; dependency prerequisites must be verified; existing plans require user reset. Read tools, issue lookup and workflow status remain available. The explicit plan-only command blocks implementation in both policies.
+
+Strict mode replaces unchecked final answers, requests at most two repair turns and then records an incomplete status. Use advisory when you want practical partial handoffs. Verification locks non-read calls while it runs, and outstanding tools must finish before workflow state changes in either mode, to avoid recording checks during a concurrent edit.
+
+Evidence is invalidated by non-read calls. Fingerprints cover Git HEAD, tracked files and nonignored untracked files: paths, modes, contents and symlink link text. External edits are detected when completing or recording a handoff; restored sessions require checks to run again. Ignored files, symlink referents, remote state and background processes are not fully covered.
+
+The extension is not a security sandbox and cannot certify all 25 protocols' semantic quality. A model-selected weak or mislabeled check can pass. Other extensions, user-entered shell, external processes and modified extension/session files can bypass assumptions. Human/project review, host permissions and actual acceptance evidence remain necessary. Advisory mode deliberately allows useful work and clear unverified reports.
+
+## Development
 
 ```bash
 npm ci --ignore-scripts
@@ -116,17 +149,16 @@ npm run check
 npm pack --dry-run
 ```
 
-`check` runs strict TypeScript checking, command/state tests, failure/bypass/regression cases, and a real Pi loader/session check. The host check loads the package and skill, blocks an early write through Pi's actual event runner, executes a real verification command, and checks completion before/after evidence. No model request is sent. These checks do not measure model reasoning quality, production rollout, terminal rendering, or DeepSWE coding improvement.
+Checks cover strict TypeScript, session migration, command scopes, advisory blocked-tooling handoffs, real verification/stale evidence, read-only issue arguments, the Machinist adapter's subprocess contract and a real Pi loader/session. No model request is sent. No DeepSWE coding improvement or productivity gain has been measured.
 
-Pi's host and TypeBox are peer dependencies with the documented `*` range; development versions are pinned for repeatable checks. `private: true` prevents accidental npm publishing while allowing installation from git or a local directory.
+Pi and TypeBox are peer dependencies; development versions are locked. `private: true` prevents accidental npm publication while permitting Git/local installation.
 
-## References and attribution
+## References
 
-- [Complete playbook and research bibliography](skills/engineering-delivery/references/AGENTS.md)
-- [Bundled engineering-delivery skill](skills/engineering-delivery/SKILL.md)
-- [Upstream agent-skills](https://github.com/addyosmani/agent-skills)
-- [Official Pi extension documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
-- [Official Pi package documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md)
+- [Full 25-workflow playbook and research bibliography](skills/engineering-delivery/references/AGENTS.md)
+- [Engineering Delivery skill](skills/engineering-delivery/SKILL.md)
+- [Addy Osmani's agent-skills](https://github.com/addyosmani/agent-skills)
+- [Machinist workflow contract](https://github.com/owainlewis/machinist/blob/39435164faf1ff7fad49e41c38a7eb1a00538f21/docs/workflows.md)
+- [Machinist artifacts](https://github.com/owainlewis/machinist/blob/39435164faf1ff7fad49e41c38a7eb1a00538f21/docs/artifacts.md)
+- [Pi extensions](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
 - [Attribution and evidence limits](NOTICE.md)
-
-The workflow is informed by research, not benchmark-proven to improve every project. The playbook includes a proposed evaluation procedure; no empirical performance gain is claimed.

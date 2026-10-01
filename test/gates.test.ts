@@ -45,7 +45,7 @@ test("restored plans lose evidence and are isolated to their project", () => {
   assert.equal(restoreGates([{type:"custom",customType:GATE_STATE,data:emptyState("/p")}],"/p").demanded,false);
 });
 
-function wire(cwd: string) {
+function wire(cwd: string, strict = true) {
   const handlers = new Map<string, (event: any,ctx: ExtensionContext) => any>();
   let tool: any, command: any;
   const entries: any[]=[];
@@ -55,6 +55,7 @@ function wire(cwd: string) {
     sendUserMessage(){},
     exec:async(c:string,args:string[],options:any)=>{ try { const r=await exec(c,args,{cwd:options.cwd,timeout:options.timeout,signal:options.signal,encoding:"utf8"}); return {...r,code:0,killed:false}; } catch(e:any){return {stdout:String(e.stdout??""),stderr:String(e.stderr??""),code:e.code,killed:Boolean(e.killed)};} }
   } as unknown as ExtensionAPI;
+  if (strict) entries.push({type:"custom",customType:"engineering-playbook:settings",data:{version:1,enabled:true,policy:"strict"}});
   extension(pi); handlers.get("session_start")!({},ctx);
   return { emit:(name:string,event:any)=>handlers.get(name)!(event,ctx), run:(args:any)=>tool.execute("wf",args,undefined,undefined,ctx), command:(args:string)=>command.handler(args,ctx) };
 }
@@ -88,6 +89,8 @@ test("actual execution, stale changes, failed reruns, and plan replacement are e
     assert.match((await h.run({action:"complete"})).content[0].text,/verified/);
     const fp=await workspaceFingerprint(dir); await writeFile(join(dir,"new-file"),"new source");
     assert.notEqual(await workspaceFingerprint(dir),fp);
+    const handoff=await h.run({action:"handoff",summary:"External change happened after the check"});
+    assert.equal(handoff.details.slices[0].status,"verification-stale");
   } finally {await rm(dir,{recursive:true,force:true});}
 });
 
@@ -125,4 +128,38 @@ test("plan command stops at a plan and prevents implementation", async () => {
   assert.equal(h.emit("tool_call",{toolName:"write",toolCallId:"plan-write"}).block,true);
   await assert.rejects(h.run({action:"start",sliceId:"V1"}),/Plan-only/);
   assert.equal(await h.emit("agent_before_settle",{outcome:"completed",context:{canContinue:true}}),undefined);
+});
+
+test("advisory preserves the user's blocked-assets handoff and allows rendering work", async () => {
+  const h=wire(process.cwd(),false);
+  const assets=slice("assets"), rendering=slice("rendering"); rendering.dependsOn=["assets"];
+  await h.run({action:"plan",slices:[assets,rendering]});
+  await h.run({action:"blocked",sliceId:"assets",reason:"uv missing; Python 3.12 unavailable; HTTP and wheel checks unverified"});
+  const message={role:"assistant",stopReason:"stop",content:[{type:"text",text:"Assets implemented. Syntax and diff checks passed. HTTP and wheel checks could not run. Rendering remains; next fix the Python environment."}]};
+  assert.equal(await h.emit("message_end",{message}),undefined);
+  assert.equal(await h.emit("agent_before_settle",{outcome:"completed",context:{canContinue:true}}),undefined);
+  assert.equal(h.emit("tool_call",{toolName:"bash",toolCallId:"inspect"}),undefined);
+  assert.match((await h.run({action:"status"})).content[0].text,/rendering: planned/);
+  h.emit("tool_result",{toolCallId:"inspect"});
+  await h.run({action:"start",sliceId:"rendering"});
+  assert.equal(h.emit("tool_call",{toolName:"edit",toolCallId:"render"}),undefined);
+  h.emit("tool_result",{toolCallId:"render"});
+  const handoff=await h.run({action:"handoff",summary:message.content[0].text,nextSteps:["Use the supported Python version, then run HTTP/wheel checks"]});
+  assert.equal(handoff.details.slices[0].checks[0].passed,false);
+  assert.equal(handoff.details.slices[1].status,"planned");
+});
+
+test("advisory allows ordinary work and replanning without pretending it is verified", async () => {
+  const h=wire(process.cwd(),false);
+  assert.equal(h.emit("tool_call",{toolName:"write",toolCallId:"small"}),undefined);
+  h.emit("tool_result",{toolCallId:"small"});
+  await h.run({action:"plan",slices:[slice("old")]});
+  await h.run({action:"plan",slices:[{...slice("new"),issueUrl:"https://github.com/acme/app/issues/42"}]});
+  assert.match((await h.run({action:"status"})).content[0].text,/issues\/42/);
+  await h.run({action:"start",sliceId:"new"});
+  await assert.rejects(h.run({action:"complete"}),/Completion blocked/);
+  await h.command("strict");
+  await assert.rejects(h.run({action:"plan",slices:[slice()]}),/already exists/);
+  await h.command("advisory");
+  await h.run({action:"plan",slices:[slice()]});
 });

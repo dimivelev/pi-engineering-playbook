@@ -4,6 +4,8 @@ The bundled engineering workflow adapts the concepts and 25 named workflows of [
 
 The consolidated AGENTS.md, research synthesis, and Pi extension implementation were prepared for this project. This package is an independent adaptation; it does not imply endorsement from the upstream author or Pi maintainers.
 
+Version 0.3 adds an independently implemented Pi executor adapter and stage/handoff examples informed by [owainlewis/machinist](https://github.com/owainlewis/machinist), inspected at commit `39435164faf1ff7fad49e41c38a7eb1a00538f21`. No Machinist server/worker code is bundled, and this package does not imply endorsement or reproduce its control plane. Machinist is separately distributed under its own MIT license. The integration examples follow its workflow result and artifact contracts.
+
 The research appendix in `skills/engineering-delivery/references/AGENTS.md` distinguishes source findings from engineering inferences and proposes an evaluation protocol. The extension itself has not undergone a controlled productivity or correctness benchmark.
 
 Pi API and package conventions were checked against the official `earendil-works/pi` source and `@earendil-works/pi-coding-agent` 0.99.1 on 2026-09-30. Public source links may change; the development lockfile pins the tested host distribution.

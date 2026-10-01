@@ -1,13 +1,15 @@
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { HELP, SECTION, STATE_TYPE, parseCommand, restoreEnabled, workflowContext, workflowPrompt } from "./workflow.ts";
+import { HELP, SECTION, STATE_TYPE, parseCommand, restoreEnabled, restorePolicy, workflowContext, workflowPrompt, type Policy } from "./workflow.ts";
+import { registerIssues } from "./issues.ts";
 import { GATE_STATE, READ_TOOLS, emptyState, missingChecks, pending, restoreGates, rootListing, startSlice, summary, validatePlan, workspaceFingerprint } from "./gates.ts";
 
 const skillPath = fileURLToPath(new URL("../skills/engineering-delivery/SKILL.md", import.meta.url));
 
 export default function engineeringPlaybook(pi: ExtensionAPI): void {
   let enabled = true;
+  let policy: Policy = "advisory";
   let gates = emptyState(process.cwd());
   let verifying = false;
   let inFlight = new Set<string>();
@@ -18,11 +20,12 @@ export default function engineeringPlaybook(pi: ExtensionAPI): void {
   function save(): void { pi.appendEntry(GATE_STATE, gates); }
 
   function updateStatus(ctx: ExtensionContext): void {
-    if (ctx.hasUI) ctx.ui.setStatus("engineering-playbook", `Engineering: ${enabled ? "on" : "off"}`);
+    if (ctx.hasUI) ctx.ui.setStatus("engineering-playbook", `Engineering: ${enabled ? policy : "off"}`);
   }
 
   function restore(ctx: ExtensionContext): void {
     enabled = restoreEnabled(ctx.sessionManager.getBranch());
+    policy = restorePolicy(ctx.sessionManager.getBranch());
     gates = restoreGates(ctx.sessionManager.getBranch(), ctx.cwd);
     verifying = false; inFlight = new Set(); repairTurns = 0;
     updateStatus(ctx);
@@ -30,7 +33,7 @@ export default function engineeringPlaybook(pi: ExtensionAPI): void {
 
   function setEnabled(value: boolean, ctx: ExtensionContext): void {
     enabled = value;
-    pi.appendEntry(STATE_TYPE, { version: 1, enabled });
+    pi.appendEntry(STATE_TYPE, { version: 1, enabled, policy });
     updateStatus(ctx);
   }
 
@@ -42,7 +45,10 @@ export default function engineeringPlaybook(pi: ExtensionAPI): void {
     planningOnly = nextPlanningOnly; nextPlanningOnly = false;
     if (enabled) {
       // Add a dedicated section without replacing the host or other extensions' prompt.
-      event.systemPromptOptions.sections[SECTION] = workflowContext(skillPath) + `\n\nRuntime gates are ON. Before edit/write, bash/powershell, or other non-read tools, use engineering_workflow plan then start. read/grep/find/ls and engineering_workflow status remain available for discovery. Use verify to execute planned checks, then complete with fresh passing evidence. Vertical slices require an integration/e2e check; horizontal slices require a consumer. Use blocked with a concrete reason if verification cannot run. Only the user can disable/reset these gates.\nCurrent gate state:\n${summary(gates)}`;
+      const guidance = policy === "strict"
+        ? "Strict gates are ON by explicit user choice. Before non-read tools, use engineering_workflow plan then start. Use verify then complete with fresh passing evidence. Only the user changes policy or resets strict plans."
+        : "Advisory mode: tools are available without a formal plan. Use a short inline plan for small tasks; use engineering_workflow for substantial multi-slice work. It records evidence, not permission to keep working. Final answers are preserved and no forced repair turns run. Missing uv/Python/pytest/build tools are verification gaps: inspect project-supported alternatives, run useful available checks, continue independent work, and give a clear handoff. Do not retry an unchanged environment failure, weaken checks, or call unverified work verified. Do not require the user to reset a stale plan for a new task.";
+      event.systemPromptOptions.sections[SECTION] = workflowContext(skillPath) + `\n\n${guidance}\nUse existing GitHub issues as the tracker when present. engineering_issues lists/views tickets read-only; link slice issueUrl to matching issues. Use engineering_workflow handoff to record progress, checks, blockers and remaining slices without declaring success. At stage boundaries preserve artifacts and exact recovery steps, as in Machinist.\nCurrent workflow state:\n${summary(gates)}`;
     } else {
       delete event.systemPromptOptions.sections[SECTION];
     }
@@ -53,7 +59,7 @@ export default function engineeringPlaybook(pi: ExtensionAPI): void {
     if (planningOnly) return { block: true, reason: "The user requested a plan only. Use read/grep/find/ls/status; no implementation or shell execution." };
     if (verifying) return { block: true, reason: "Verification is running. Wait before changing the workspace." };
     gates.demanded = true;
-    if (!gates.active) {
+    if (policy === "strict" && !gates.active) {
       save();
       return { block: true, reason: "Runtime gate: register slices with engineering_workflow plan, then start one. Shell commands are gated too; use read/grep/find/ls/status for discovery." };
     }
@@ -64,7 +70,7 @@ export default function engineeringPlaybook(pi: ExtensionAPI): void {
   pi.on("tool_result", event => { inFlight.delete(event.toolCallId); });
 
   async function outstanding(ctx: ExtensionContext): Promise<string | undefined> {
-    if (!enabled || planningOnly || !gates.demanded) return;
+    if (!enabled || policy !== "strict" || planningOnly || !gates.demanded) return;
     if (pending(gates)) return summary(gates);
     if (gates.slices.some(s => s.status === "blocked")) return; // Honest blocked reports may stop.
     try {
@@ -76,7 +82,7 @@ export default function engineeringPlaybook(pi: ExtensionAPI): void {
   pi.on("message_end", async (event, ctx) => {
     const message = event.message;
     if (message.role !== "assistant" || message.stopReason === "error" || message.stopReason === "aborted" || message.content.some(c => c.type === "toolCall")) return;
-    if (enabled && !planningOnly && gates.demanded && !pending(gates) && gates.slices.some(s => s.status === "blocked")) {
+    if (enabled && policy === "strict" && !planningOnly && gates.demanded && !pending(gates) && gates.slices.some(s => s.status === "blocked")) {
       return { message: { ...message, content: [{ type: "text" as const, text: `Engineering workflow is blocked; full completion is not verified.\n${summary(gates)}` }] } };
     }
     const gap = await outstanding(ctx);
@@ -95,26 +101,39 @@ export default function engineeringPlaybook(pi: ExtensionAPI): void {
   });
 
   const checkSchema = Type.Object({ id: Type.String(), command: Type.String(), kind: Type.Union([Type.Literal("unit"), Type.Literal("integration"), Type.Literal("e2e")]) });
+  registerIssues(pi);
   pi.registerTool({
     name: "engineering_workflow", label: "Engineering workflow gates",
-    description: "Runtime-enforced engineering plan/start/verify/complete/blocked/status. Verification executes exact planned shell commands and records real exits plus Git-tree fingerprints. Caller-supplied success/evidence is never accepted. Only user /engineering off/reset disables/resets gates.",
+    description: "Engineering plan/start/verify/complete/blocked/status/handoff. Optional in default advisory mode. verify executes real planned checks; complete only records verified work. blocked records a gap without globally stopping advisory work. handoff records useful progress without claiming completion. Strict gates are opt-in through user /engineering strict.",
     executionMode: "sequential",
     parameters: Type.Object({
-      action: Type.Union(["plan", "start", "verify", "complete", "blocked", "status"].map(s => Type.Literal(s))),
-      sliceId: Type.Optional(Type.String()), reason: Type.Optional(Type.String()),
-      slices: Type.Optional(Type.Array(Type.Object({ id: Type.String(), kind: Type.Union([Type.Literal("horizontal"), Type.Literal("vertical"), Type.Literal("spike")]), outcome: Type.String(), acceptance: Type.Array(Type.String()), dependsOn: Type.Array(Type.String()), consumer: Type.Optional(Type.String()), checks: Type.Array(checkSchema) })))
+      action: Type.Union(["plan", "start", "verify", "complete", "blocked", "status", "handoff"].map(s => Type.Literal(s))),
+      sliceId: Type.Optional(Type.String()), reason: Type.Optional(Type.String()), summary: Type.Optional(Type.String()), nextSteps: Type.Optional(Type.Array(Type.String())),
+      slices: Type.Optional(Type.Array(Type.Object({ id: Type.String(), kind: Type.Union([Type.Literal("horizontal"), Type.Literal("vertical"), Type.Literal("spike")]), outcome: Type.String(), acceptance: Type.Array(Type.String()), dependsOn: Type.Array(Type.String()), consumer: Type.Optional(Type.String()), issueUrl: Type.Optional(Type.String()), checks: Type.Array(checkSchema) })))
     }),
     execute: async (_id, args, signal, _onUpdate, ctx) => {
-      if (verifying || inFlight.size) throw Error("Wait for outstanding tool executions before changing workflow state or verifying.");
       const answer = (text: string) => ({ content: [{ type: "text" as const, text }], details: undefined });
       if (args.action === "status") return answer(`${summary(gates)}\nProject entries: ${(await rootListing(ctx.cwd)).join(", ")}`);
+      if (verifying || inFlight.size) throw Error("Wait for outstanding tool executions before changing workflow state or verifying.");
       if (!enabled) throw Error("Workflow is off. The user must enable it with /engineering on.");
+      if (args.action === "handoff") {
+        if (!args.summary?.trim()) throw Error("Provide a useful summary of implemented work and verification gaps.");
+        let fingerprint: string | undefined, fingerprintError: string | undefined;
+        try { fingerprint = await workspaceFingerprint(ctx.cwd); } catch (error) { fingerprintError = String(error); }
+        const record = { version: 1, at: new Date().toISOString(), summary: args.summary, nextSteps: args.nextSteps ?? [], fingerprintError,
+          slices: gates.slices.map(s => {
+            const checks=s.checks.map(c => ({...c,passed:Boolean(fingerprint && gates.evidence.some(e=>e.sliceId===s.id && e.checkId===c.id && e.command===c.command && e.code===0 && e.fingerprint===fingerprint))}));
+            return {id:s.id,issueUrl:s.issueUrl,outcome:s.outcome,status:s.status === "verified" && checks.some(c=>!c.passed) ? "verification-stale" : s.status,blocker:s.blockedReason,checks};
+          }) };
+        pi.appendEntry("engineering-playbook:handoff", record);
+        return { content:[{type:"text" as const,text:JSON.stringify(record,null,2)}],details:record };
+      }
       if (planningOnly && args.action !== "plan") throw Error("Plan-only scope: register the plan and stop. Implementation/verification was not requested.");
       if (args.action === "plan") {
-        if (gates.slices.length) throw Error("A plan already exists. Preserve it; only the user can /engineering reset.");
+        if (policy === "strict" && gates.slices.length) throw Error("A plan already exists. Preserve it; only the user can /engineering reset.");
         gates = { ...emptyState(ctx.cwd), demanded: true, slices: validatePlan(args.slices ?? []) }; save();
       } else if (args.action === "start") {
-        startSlice(gates, args.sliceId ?? ""); save();
+        startSlice(gates, args.sliceId ?? "", policy === "strict"); save();
       } else if (args.action === "blocked") {
         const slice = gates.slices.find(s => s.id === (args.sliceId ?? gates.active));
         if (!slice || !args.reason?.trim()) throw Error("Name an existing slice and concrete blocker.");
@@ -156,7 +175,7 @@ export default function engineeringPlaybook(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("engineering", {
-    description: "Engineering workflow: on/off/status/reset, plan, build, review, release",
+    description: "Engineering workflow: advisory/strict/on/off/status/reset, plan, build, review, release, tickets",
     handler: async (args, ctx) => {
       const command = parseCommand(args);
       if (command.kind === "invalid") {
@@ -168,7 +187,7 @@ export default function engineeringPlaybook(pi: ExtensionAPI): void {
         return;
       }
       if (command.kind === "status") {
-        ctx.ui.notify(`Engineering Playbook: ${enabled ? "on" : "off"}\n${summary(gates)}\nSkill: ${skillPath}`, "info");
+        ctx.ui.notify(`Engineering Playbook: ${enabled ? `on (${policy})` : "off"}\n${summary(gates)}\nSkill: ${skillPath}`, "info");
         return;
       }
       if (!ctx.isIdle()) {
@@ -179,6 +198,10 @@ export default function engineeringPlaybook(pi: ExtensionAPI): void {
         setEnabled(command.kind === "on", ctx);
         ctx.ui.notify(`Engineering Playbook: ${enabled ? "on" : "off"}`, "info");
         return;
+      }
+      if (command.kind === "advisory" || command.kind === "strict") {
+        policy = command.kind; setEnabled(true, ctx);
+        ctx.ui.notify(`Engineering Playbook: ${policy}`, "info"); return;
       }
       if (command.kind === "reset") {
         gates = emptyState(ctx.cwd); inFlight.clear(); save();

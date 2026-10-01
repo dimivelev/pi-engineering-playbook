@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 export const GATE_STATE = "engineering-playbook:gates";
-export const READ_TOOLS = new Set(["read", "grep", "find", "ls"]);
+export const READ_TOOLS = new Set(["read", "grep", "find", "ls", "engineering_issues"]);
 export interface Check { id: string; command: string; kind: "unit" | "integration" | "e2e"; }
 export interface Slice {
   id: string;
@@ -15,6 +15,7 @@ export interface Slice {
   acceptance: string[];
   dependsOn: string[];
   consumer?: string;
+  issueUrl?: string;
   checks: Check[];
   status?: "planned" | "verified" | "blocked";
   blockedReason?: string;
@@ -37,6 +38,7 @@ export function validatePlan(slices: Slice[]): Slice[] {
     if (new Set(s.checks.map(c => c.id)).size !== s.checks.length) throw Error(`Duplicate check IDs: ${s.id}`);
     if (s.kind === "horizontal" && !s.consumer?.trim()) throw Error(`Name the consumer/integration checkpoint for horizontal slice ${s.id}.`);
     if (s.kind === "vertical" && !s.checks.some(c => c.kind === "integration" || c.kind === "e2e")) throw Error(`Vertical slice ${s.id} needs an integration or end-to-end check.`);
+    if (s.issueUrl && !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/issues\/[1-9]\d*$/.test(s.issueUrl)) throw Error(`Use a canonical GitHub issue URL: ${s.id}`);
     if (!Array.isArray(s.dependsOn) || s.dependsOn.some(id => id === s.id || !ids.has(id))) throw Error(`Invalid dependencies: ${s.id}`);
   }
   const visiting = new Set<string>(), visited = new Set<string>();
@@ -48,7 +50,7 @@ export function validatePlan(slices: Slice[]): Slice[] {
   }
   slices.forEach(s => visit(s.id));
   // Only plan fields are accepted: callers cannot supply status or fabricated evidence.
-  return slices.map(s => ({ id: s.id, kind: s.kind, outcome: s.outcome, acceptance: [...s.acceptance], dependsOn: [...s.dependsOn], consumer: s.consumer, checks: s.checks.map(c => ({...c})), status: "planned" }));
+  return slices.map(s => ({ id: s.id, kind: s.kind, outcome: s.outcome, acceptance: [...s.acceptance], dependsOn: [...s.dependsOn], consumer: s.consumer, issueUrl: s.issueUrl, checks: s.checks.map(c => ({...c})), status: "planned" }));
 }
 
 export function restoreGates(entries: readonly unknown[], cwd: string): GateState {
@@ -70,11 +72,11 @@ export function restoreGates(entries: readonly unknown[], cwd: string): GateStat
   return state;
 }
 
-export function startSlice(state: GateState, id: string): void {
+export function startSlice(state: GateState, id: string, strict = true): void {
   if (state.active && state.active !== id) throw Error(`Finish or explicitly block active slice ${state.active} first.`);
   const slice = state.slices.find(s => s.id === id);
   if (!slice) throw Error(`Unknown slice: ${id}`);
-  if (slice.dependsOn.some(d => state.slices.find(s => s.id === d)?.status !== "verified")) throw Error("Verify prerequisite slices first.");
+  if (strict && slice.dependsOn.some(d => state.slices.find(s => s.id === d)?.status !== "verified")) throw Error("Verify prerequisite slices first.");
   slice.status = "planned"; delete slice.blockedReason;
   state.active = id; state.demanded = true; state.evidence = [];
 }
@@ -90,7 +92,7 @@ export function pending(state: GateState): boolean {
 
 export function summary(state: GateState): string {
   if (!state.slices.length) return state.demanded ? "Unverified: register a plan and active slice." : "No engineering work started.";
-  return state.slices.map(s => `${s.id}: ${s.status}${state.active === s.id ? " (active)" : ""}${s.blockedReason ? ` — ${s.blockedReason}` : ""}`).join("\n");
+  return state.slices.map(s => `${s.id}: ${s.status}${state.active === s.id ? " (active)" : ""}${s.issueUrl ? ` [${s.issueUrl}]` : ""}${s.blockedReason ? ` — ${s.blockedReason}` : ""}`).join("\n");
 }
 
 /** Hash HEAD plus tracked and nonignored files. Failure is closed, not a fake clean state. */

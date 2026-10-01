@@ -1,0 +1,27 @@
+{
+  "name": "pi-engineering-playbook",
+  "version": "0.1.0",
+  "description": "Research-informed end-to-end engineering workflow for Pi, with horizontal and vertical slices.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "keywords": ["pi-package", "pi-extension", "engineering", "agent-skills"],
+  "engines": { "node": ">=22.19.0" },
+  "files": ["extensions", "skills", "README.md", "LICENSE", "NOTICE.md"],
+  "pi": {
+    "extensions": ["./extensions/index.ts"],
+    "skills": ["./skills"]
+  },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.99.1",
+    "@types/node": "22.19.19",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "test:host": "node --experimental-strip-types scripts/check-host.ts",
+    "check": "npm run typecheck && npm test && npm run test:host"
+  }
+}
